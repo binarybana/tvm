@@ -19,8 +19,8 @@
 
 use std::{convert::TryFrom, mem, os::raw::c_void, ptr, slice};
 
-use failure::{ensure, Error};
 use ndarray;
+use thiserror::Error;
 use tvm_sys::{ffi::DLTensor, Context, DataType};
 
 use crate::allocator::Allocation;
@@ -36,7 +36,7 @@ pub enum Storage<'a> {
 }
 
 impl<'a> Storage<'a> {
-    pub fn new(size: usize, align: Option<usize>) -> Result<Storage<'static>, Error> {
+    pub fn new(size: usize, align: Option<usize>) -> Result<Storage<'static>, dyn Error> {
         Ok(Storage::Owned(Allocation::new(size, align)?))
     }
 
@@ -299,11 +299,12 @@ macro_rules! impl_ndarray_try_from_tensor {
         impl<'t> TryFrom<Tensor<'t>> for ndarray::ArrayD<$type> {
             type Error = Error;
             fn try_from(tensor: Tensor) -> Result<ndarray::ArrayD<$type>, Error> {
-                ensure!(
-                    tensor.dtype == $dtype,
-                    "Cannot convert Tensor with dtype {:?} to ndarray",
-                    tensor.dtype
-                );
+                if tensor.dtype != $dtype {
+                    return Err(format!(
+                        "Cannot convert Tensor with dtype {:?} to ndarray",
+                        tensor.dtype
+                    ));
+                }
                 Ok(ndarray::Array::from_shape_vec(
                     tensor
                         .shape

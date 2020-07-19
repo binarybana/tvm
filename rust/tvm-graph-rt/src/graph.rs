@@ -19,7 +19,6 @@
 
 use std::{cmp, collections::HashMap, convert::TryFrom, iter::FromIterator, mem, str};
 
-use failure::{ensure, format_err, Error};
 use itertools::izip;
 use nom::{
     character::complete::{alpha1, digit1},
@@ -27,7 +26,6 @@ use nom::{
     number::complete::{le_i32, le_i64, le_u16, le_u32, le_u64, le_u8},
     opt, tag, take, tuple,
 };
-
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -128,17 +126,19 @@ impl Node {
 }
 
 impl<'a> TryFrom<&'a String> for Graph {
-    type Error = Error;
+    type Error = GraphFormatError;
     fn try_from(graph_json: &String) -> Result<Self, self::Error> {
-        let graph = serde_json::from_str(graph_json)?;
+        let graph =
+            serde_json::from_str(graph_json).unwrap_or_else(|e| GraphFormatError::Parse(e))?;
         Ok(graph)
     }
 }
 
 impl<'a> TryFrom<&'a str> for Graph {
-    type Error = Error;
+    type Error = GraphFormatError;
     fn try_from(graph_json: &'a str) -> Result<Self, Self::Error> {
-        let graph = serde_json::from_str(graph_json)?;
+        let graph =
+            serde_json::from_str(graph_json).unwrap_or_else(|e| GraphFormatError::Parse(e))?;
         Ok(graph)
     }
 }
@@ -246,8 +246,10 @@ impl<'m, 't> GraphExecutor<'m, 't> {
         graph: &Graph,
         lib: &'m M,
         tensors: &[Tensor<'t>],
-    ) -> Result<Vec<Box<dyn Fn() + 'm>>, Error> {
-        ensure!(graph.node_row_ptr.is_some(), "Missing node_row_ptr.");
+    ) -> Result<Vec<Box<dyn Fn() + 'm>>, dyn Error> {
+        if !graph.node_row_ptr.is_some() {
+            return Err("Missing node_row_ptr.");
+        }
         let node_row_ptr = graph.node_row_ptr.as_ref().unwrap();
 
         let mut op_execs = Vec::new();
@@ -255,8 +257,12 @@ impl<'m, 't> GraphExecutor<'m, 't> {
             if node.op == "null" {
                 continue;
             }
-            ensure!(node.op == "tvm_op", "Only TVM ops are supported.");
-            ensure!(node.attrs.is_some(), "Missing node attrs.");
+            if node.op != "tvm_op" {
+                Err("Only TVM ops are supported.");
+            }
+            if !node.attrs.is_some() {
+                GraphFormatError::MissingAttr(node.op, "");
+            }
 
             let attrs = node.parse_attrs()?;
 
@@ -266,7 +272,7 @@ impl<'m, 't> GraphExecutor<'m, 't> {
 
             let func = lib
                 .get_function(&attrs.func_name)
-                .ok_or_else(|| format_err!("Library is missing function {}", attrs.func_name))?;
+                .ok_or_else(|| Err(format!("Library is missing function {}", attrs.func_name)))?;
             let arg_indices = node
                 .inputs
                 .iter()
@@ -282,7 +288,7 @@ impl<'m, 't> GraphExecutor<'m, 't> {
                         DLTensor::from(tensor)
                     })
                 })
-                .collect::<Result<Vec<DLTensor>, Error>>()
+                .collect::<Result<Vec<DLTensor>, GraphFormatError>>()
                 .unwrap();
             let op: Box<dyn Fn()> = Box::new(move || {
                 let args = dl_tensors

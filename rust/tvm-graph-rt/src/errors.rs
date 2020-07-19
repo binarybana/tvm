@@ -17,18 +17,24 @@
  * under the License.
  */
 
-use failure::Fail;
+use thiserror::Error;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum GraphFormatError {
-    #[fail(display = "Could not parse graph json")]
-    Parse(#[fail(cause)] failure::Error),
-    #[fail(display = "Could not parse graph params")]
+    #[error("Could not parse graph json")]
+    Parse(std::error::Error),
+    #[error("Could not parse graph params")]
     Params,
-    #[fail(display = "{} is missing attr: {}", 0, 1)]
+    #[error("{0} is missing attr: {1}")]
     MissingAttr(String, String),
-    #[fail(display = "Missing field: {}", 0)]
+    #[error("Missing field: {0}")]
     MissingField(&'static str),
-    #[fail(display = "Invalid DLType: {}", 0)]
+    #[error("Invalid DLType: {0}")]
     InvalidDLType(String),
+}
+
+#[derive(Debug, Error)]
+pub enum ArrayError {
+    #[error("Could not parse graph json")]
+    Parse(std::error::Error),
 }
